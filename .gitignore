@@ -13,3 +13,5 @@
 .externalNativeBuild
 .cxx
 local.properties
+# Release APK files
+app/release/
