@@ -159,6 +159,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import kotlin.math.max
 import kotlin.math.roundToInt
 
 class MainActivity : ComponentActivity() {
@@ -907,18 +908,17 @@ private fun PersonalityScreen(
         return
     }
 
-    var recommendationSeed by rememberSaveable { mutableIntStateOf(0) }
-    val recentAddedSongs = remember(songs) {
-        songs.sortedByDescending { it.dateAddedSec }.take(10)
+    val configuration = LocalConfiguration.current
+    val screenWidthDp = configuration.screenWidthDp.dp
+    // 手机固定2列，大屏根据宽度计算列数（每列最小160dp）
+    val columnCount = if (isWideScreen) {
+        max(2, (screenWidthDp / 160.dp).toInt())
+    } else {
+        2
     }
-    val randomRecommendationColumns = remember(songs, recommendationSeed) {
-        buildRecommendationSongs(
-            songs.shuffled(kotlin.random.Random(recommendationSeed + 1)),
-            recommendationSeed
-        )
-            .take(9)
-            .chunked(3)
-    }
+    val horizontalPadding = 16.dp
+    val spacing = 12.dp
+    val itemWidth = (screenWidthDp - horizontalPadding * 2 - spacing * (columnCount - 1)) / columnCount
 
     Box(
         modifier = Modifier
@@ -941,52 +941,81 @@ private fun PersonalityScreen(
             }
 
             item {
-                PrimarySectionHeader(title = "\u8fd1\u671f\u4e0a\u65b0")
+                PrimarySectionHeader(title = "\u5168\u90e8\u6b4c\u66f2")
             }
 
-            item {
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(15.dp),
-                    contentPadding = PaddingValues(horizontal = 20.dp)
+            // 网格化排布歌曲，只显示专辑图
+            val rows = songs.chunked(columnCount)
+            items(rows.size) { rowIndex ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = horizontalPadding),
+                    horizontalArrangement = Arrangement.spacedBy(spacing)
                 ) {
-                    items(recentAddedSongs, key = { it.id }) { song ->
-                        RecentAddedCard(
+                    val rowSongs = rows[rowIndex]
+                    rowSongs.forEach { song ->
+                        AlbumCoverItem(
                             song = song,
+                            size = itemWidth,
                             onClick = { onPlaySong(song) }
                         )
                     }
-                }
-            }
-
-            item {
-                PrimarySectionHeader(
-                    title = "\u968f\u673a\u63a8\u8350",
-                    actionText = "\u6362\u4e00\u6362",
-                    onActionClick = { recommendationSeed += 1 }
-                )
-            }
-
-            item {
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    contentPadding = PaddingValues(horizontal = 20.dp)
-                ) {
-                    items(randomRecommendationColumns.size, key = { it }) { columnIndex ->
-                        Column(
-                            modifier = Modifier.width(310.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            randomRecommendationColumns[columnIndex].forEach { song ->
-                                PersonalRecommendationRow(
-                                    song = song,
-                                    onClick = { onPlaySong(song) }
-                                )
-                            }
-                        }
+                    // 补齐空白位置
+                    repeat(columnCount - rowSongs.size) {
+                        Box(modifier = Modifier.width(itemWidth))
                     }
                 }
             }
 
+        }
+    }
+}
+
+// 专辑封面网格项
+@Composable
+private fun AlbumCoverItem(
+    song: SongItem,
+    size: androidx.compose.ui.unit.Dp,
+    onClick: () -> Unit
+) {
+    val context = LocalContext.current
+    val coverRequest = remember(song.albumArtUri) {
+        coil.request.ImageRequest.Builder(context)
+            .data(song.albumArtUri)
+            .crossfade(false)
+            .size(300)
+            .build()
+    }
+
+    Box(
+        modifier = Modifier
+            .size(size)
+            .clip(RoundedCornerShape(12.dp))
+            .clickable { onClick() },
+        contentAlignment = Alignment.Center
+    ) {
+        if (song.albumArtUri != null) {
+            coil.compose.AsyncImage(
+                model = coverRequest,
+                contentDescription = song.title,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.MusicNote,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(size * 0.4f)
+                )
+            }
         }
     }
 }
@@ -1113,43 +1142,23 @@ private fun LibraryTopBarContent(
         }
     }
 
-    // SenUI ActionSheet 弹窗选择
+    // SenUI ActionSheet 弹窗选择 - 使用 ActionSheetCardList 组件
     if (showTabSelector) {
         ActionSheet(
             title = "\u5207\u6362\u5206\u7c7b",
             onDismiss = { showTabSelector = false }
         ) {
             Column {
-                tabs.forEachIndexed { index, tab ->
-                    val isSelected = index == topTabIndex
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(56.dp)
-                            .clickable {
-                                topTabIndex = index
-                                showTabSelector = false
-                            }
-                            .padding(horizontal = 24.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            text = tab,
-                            fontSize = 17.sp,
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground
-                        )
-                        if (isSelected) {
-                            Icon(
-                                imageVector = Icons.Rounded.Check,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
+                Box(modifier = Modifier.height(16.dp))
+                ActionSheetCardList(
+                    items = tabs,
+                    selectedIndex = topTabIndex,
+                    onItemSelected = { index ->
+                        topTabIndex = index
+                        showTabSelector = false
                     }
-                }
+                )
+                Box(modifier = Modifier.height(8.dp))
             }
         }
     }
